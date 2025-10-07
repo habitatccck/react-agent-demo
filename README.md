@@ -170,6 +170,54 @@ gunicorn src.api.direct_fastapi_app:app -w 4 -k uvicorn.workers.UvicornWorker
 # 配置 nginx.conf
 ```
 
+## Railway 云部署
+
+### 快速部署到 Railway
+
+1. **准备环境变量**
+
+   ```bash
+   # 复制环境变量示例
+   cp env.example .env
+   # 编辑 .env 文件设置 API 密钥
+   ```
+
+2. **部署到 Railway**
+
+   ```bash
+   # 安装 Railway CLI
+   npm install -g @railway/cli
+
+   # 登录并部署
+   railway login
+   railway init
+   railway up
+   ```
+
+3. **设置环境变量**
+   在 Railway 控制台设置以下环境变量：
+
+   - `OPENAI_API_KEY`: 你的 OpenAI API 密钥
+   - `TAVILY_API_KEY`: Tavily 搜索 API 密钥
+
+4. **访问服务**
+   Railway 会提供一个公网 URL，例如：
+   ```
+   https://your-app-name.railway.app
+   ```
+
+### Railway 部署特性
+
+- ✅ **自动端口配置**: Railway 自动设置 `PORT` 环境变量
+- ✅ **公网访问**: 自动获得公网 IP 和域名
+- ✅ **健康检查**: 自动监控服务状态
+- ✅ **日志监控**: 实时查看服务日志
+- ✅ **自动重启**: 服务异常时自动重启
+
+### 详细部署指南
+
+查看 [RAILWAY_DEPLOYMENT.md](./RAILWAY_DEPLOYMENT.md) 获取完整的部署指南。
+
 ## 故障排除
 
 ### 常见问题
