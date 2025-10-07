@@ -1,0 +1,21 @@
+# 开发环境 Docker Compose 配置
+version: "3.8"
+
+services:
+  langgraph:
+    volumes:
+      - ./src:/app/src:ro
+      - ./langgraph.json:/app/langgraph.json:ro
+    environment:
+      - PYTHONPATH=/app/src
+    command:
+      ["langgraph", "dev", "--host", "0.0.0.0", "--port", "2024", "--reload"]
+
+  api:
+    volumes:
+      - ./src:/app/src:ro
+      - ./start_api.py:/app/start_api.py:ro
+    environment:
+      - PYTHONPATH=/app/src
+      - DEBUG=1
+    command: ["python", "start_api.py"]
