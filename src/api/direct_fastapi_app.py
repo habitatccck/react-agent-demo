@@ -5,8 +5,9 @@
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, AsyncGenerator
 import asyncio
 import json
 import os
@@ -57,8 +58,9 @@ conversation_history: Dict[str, List[Dict[str, str]]] = {}
 async def root():
     return {
         "message": "LangGraph React Agent API 服务正在运行（直接调用模式）", 
-        "endpoints": ["/api/chat"],
-        "mode": "direct_graph_invoke"
+        "endpoints": ["/api/chat", "/api/chat/stream"],
+        "mode": "direct_graph_invoke",
+        "streaming": "支持流式输出"
     }
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -140,6 +142,111 @@ async def chat(request: ChatRequest):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"处理请求时出错: {str(e)}")
+
+async def generate_stream_response(
+    request: ChatRequest
+) -> AsyncGenerator[str, None]:
+    """
+    生成流式响应的异步生成器
+    """
+    try:
+        # 获取或初始化对话历史
+        if request.conversation_id not in conversation_history:
+            conversation_history[request.conversation_id] = []
+        
+        # 添加用户消息到历史
+        conversation_history[request.conversation_id].append({
+            "role": "human",
+            "content": request.message
+        })
+        
+        # 准备输入数据 - 转换为 LangChain 消息格式
+        messages = []
+        for msg in conversation_history[request.conversation_id]:
+            if msg["role"] == "human":
+                messages.append(HumanMessage(content=msg["content"]))
+            elif msg["role"] == "assistant":
+                messages.append(AIMessage(content=msg["content"]))
+        
+        # 创建上下文配置
+        context = Context(
+            model=request.model,
+            max_search_results=request.max_search_results
+        )
+        
+        # 准备输入状态
+        input_state = InputState(messages=messages)
+        
+        # 发送开始事件
+        yield f"data: {json.dumps({'type': 'start', 'conversation_id': request.conversation_id, 'model': request.model})}\n\n"
+        
+        # 使用 graph.astream() 进行流式调用
+        full_response = ""
+        try:
+            async for chunk in graph.astream(input_state, context=context):
+                # 处理每个流式块
+                if "messages" in chunk and chunk["messages"]:
+                    for message in chunk["messages"]:
+                        if isinstance(message, AIMessage) and not message.tool_calls:
+                            # 这是一个完整的 AI 响应消息
+                            content = message.content
+                            if content and content != full_response:
+                                # 发送增量内容
+                                new_content = content[len(full_response):]
+                                if new_content:
+                                    yield f"data: {json.dumps({'type': 'content', 'content': new_content})}\n\n"
+                                    full_response = content
+                        elif isinstance(message, AIMessage) and message.tool_calls:
+                            # 这是一个工具调用消息
+                            tool_calls = []
+                            for tool_call in message.tool_calls:
+                                tool_calls.append({
+                                    'name': tool_call['name'],
+                                    'args': tool_call['args']
+                                })
+                            yield f"data: {json.dumps({'type': 'tool_call', 'tools': tool_calls})}\n\n"
+                        elif hasattr(message, 'type') and message.type == 'tool':
+                            # 工具执行结果
+                            yield f"data: {json.dumps({'type': 'tool_result', 'content': getattr(message, 'content', '')})}\n\n"
+            
+            # 添加 AI 响应到历史
+            if full_response:
+                conversation_history[request.conversation_id].append({
+                    "role": "assistant", 
+                    "content": full_response
+                })
+            
+            # 发送完成事件
+            yield f"data: {json.dumps({'type': 'done', 'full_response': full_response})}\n\n"
+            
+        except Exception as e:
+            print(f"Graph 流式调用出错: {e}")
+            error_msg = f"调用图时出错: {str(e)}"
+            yield f"data: {json.dumps({'type': 'error', 'error': error_msg})}\n\n"
+            
+            # 添加错误响应到历史
+            conversation_history[request.conversation_id].append({
+                "role": "assistant", 
+                "content": error_msg
+            })
+        
+    except Exception as e:
+        yield f"data: {json.dumps({'type': 'error', 'error': f'处理请求时出错: {str(e)}'})}\n\n"
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    流式聊天端点，使用 Server-Sent Events (SSE) 进行流式输出
+    """
+    return StreamingResponse(
+        generate_stream_response(request),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/plain; charset=utf-8"
+        }
+    )
 
 @app.get("/api/chat/history/{conversation_id}")
 async def get_chat_history(conversation_id: str):
