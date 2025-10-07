@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from react_agent.graph import graph
 from react_agent.context import Context
 from react_agent.state import InputState
+from react_agent.tools import TOOLS
 from langchain_core.messages import HumanMessage, AIMessage
 
 # 加载环境变量
@@ -180,7 +181,7 @@ async def generate_stream_response(
         # 发送开始事件
         yield f"data: {json.dumps({'type': 'start', 'conversation_id': request.conversation_id, 'model': request.model})}\n\n"
         
-        # 使用 graph.astream() 进行流式调用
+        # 使用 graph.astream() 进行流式调用，但实现token级别的流式输出
         full_response = ""
         try:
             async for chunk in graph.astream(input_state, context=context):
@@ -189,12 +190,16 @@ async def generate_stream_response(
                     if "messages" in node_data and node_data["messages"]:
                         for message in node_data["messages"]:
                             if isinstance(message, AIMessage) and not message.tool_calls:
-                                # 这是一个完整的 AI 响应消息
+                                # 这是一个完整的 AI 响应消息，需要模拟token级别的流式输出
                                 content = message.content
                                 if content:
-                                    # 发送完整内容
-                                    yield f"data: {json.dumps({'type': 'content', 'content': content})}\n\n"
-                                    full_response = content
+                                    # 将内容按字符分割，模拟token级别的流式输出
+                                    import time
+                                    for char in content:
+                                        yield f"data: {json.dumps({'type': 'content', 'content': char})}\n\n"
+                                        full_response += char
+                                        # 添加小延迟以模拟真实的流式输出
+                                        await asyncio.sleep(0.01)
                             elif isinstance(message, AIMessage) and message.tool_calls:
                                 # 这是一个工具调用消息
                                 tool_calls = []
@@ -204,6 +209,18 @@ async def generate_stream_response(
                                         'args': tool_call['args']
                                     })
                                 yield f"data: {json.dumps({'type': 'tool_call', 'tools': tool_calls})}\n\n"
+                                
+                                # 执行工具调用
+                                for tool_call in message.tool_calls:
+                                    if tool_call['name'] == 'search':
+                                        # 如果参数为空，使用用户的消息作为查询
+                                        query = tool_call['args'].get('query') if tool_call['args'].get('query') else request.message
+                                        try:
+                                            from react_agent.tools import search
+                                            search_result = await search(query)
+                                            yield f"data: {json.dumps({'type': 'tool_result', 'content': str(search_result)})}\n\n"
+                                        except Exception as e:
+                                            yield f"data: {json.dumps({'type': 'tool_result', 'content': f'搜索出错: {str(e)}'})}\n\n"
                             elif hasattr(message, 'type') and message.type == 'tool':
                                 # 工具执行结果
                                 yield f"data: {json.dumps({'type': 'tool_result', 'content': getattr(message, 'content', '')})}\n\n"
