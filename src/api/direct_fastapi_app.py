@@ -184,30 +184,29 @@ async def generate_stream_response(
         full_response = ""
         try:
             async for chunk in graph.astream(input_state, context=context):
-                # 处理每个流式块
-                if "messages" in chunk and chunk["messages"]:
-                    for message in chunk["messages"]:
-                        if isinstance(message, AIMessage) and not message.tool_calls:
-                            # 这是一个完整的 AI 响应消息
-                            content = message.content
-                            if content and content != full_response:
-                                # 发送增量内容
-                                new_content = content[len(full_response):]
-                                if new_content:
-                                    yield f"data: {json.dumps({'type': 'content', 'content': new_content})}\n\n"
+                # 处理每个流式块 - 注意数据结构是 {'call_model': {'messages': [...]}}
+                for node_name, node_data in chunk.items():
+                    if "messages" in node_data and node_data["messages"]:
+                        for message in node_data["messages"]:
+                            if isinstance(message, AIMessage) and not message.tool_calls:
+                                # 这是一个完整的 AI 响应消息
+                                content = message.content
+                                if content:
+                                    # 发送完整内容
+                                    yield f"data: {json.dumps({'type': 'content', 'content': content})}\n\n"
                                     full_response = content
-                        elif isinstance(message, AIMessage) and message.tool_calls:
-                            # 这是一个工具调用消息
-                            tool_calls = []
-                            for tool_call in message.tool_calls:
-                                tool_calls.append({
-                                    'name': tool_call['name'],
-                                    'args': tool_call['args']
-                                })
-                            yield f"data: {json.dumps({'type': 'tool_call', 'tools': tool_calls})}\n\n"
-                        elif hasattr(message, 'type') and message.type == 'tool':
-                            # 工具执行结果
-                            yield f"data: {json.dumps({'type': 'tool_result', 'content': getattr(message, 'content', '')})}\n\n"
+                            elif isinstance(message, AIMessage) and message.tool_calls:
+                                # 这是一个工具调用消息
+                                tool_calls = []
+                                for tool_call in message.tool_calls:
+                                    tool_calls.append({
+                                        'name': tool_call['name'],
+                                        'args': tool_call['args']
+                                    })
+                                yield f"data: {json.dumps({'type': 'tool_call', 'tools': tool_calls})}\n\n"
+                            elif hasattr(message, 'type') and message.type == 'tool':
+                                # 工具执行结果
+                                yield f"data: {json.dumps({'type': 'tool_result', 'content': getattr(message, 'content', '')})}\n\n"
             
             # 添加 AI 响应到历史
             if full_response:
