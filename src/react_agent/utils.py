@@ -23,5 +23,16 @@ def load_chat_model(fully_specified_name: str) -> BaseChatModel:
     Args:
         fully_specified_name (str): String in the format 'provider/model'.
     """
+    import os
     provider, model = fully_specified_name.split("/", maxsplit=1)
+    
+    # 处理 OpenAI 的自定义 base_url
+    if provider == "openai" and os.getenv("OPENAI_BASE_URL"):
+        from langchain_openai import ChatOpenAI
+        return ChatOpenAI(
+            model=model,
+            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            openai_api_base=os.getenv("OPENAI_BASE_URL")
+        )
+    
     return init_chat_model(model, model_provider=provider)

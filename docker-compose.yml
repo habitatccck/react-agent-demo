@@ -1,61 +1,31 @@
-version: "3.8"
-
 services:
-  # LangGraph 大模型服务
-  langgraph:
-    build:
-      context: .
-      dockerfile: Dockerfile.langgraph
-    container_name: langgraph-service
-    ports:
-      - "2024:2024"
-    environment:
-      - MODEL=openai/gpt-4o-mini
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
-      - TAVILY_API_KEY=${TAVILY_API_KEY}
-    volumes:
-      - ./src:/app/src
-      - ./langgraph.json:/app/langgraph.json
-    networks:
-      - langgraph-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:2024/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-  # HTTP API 服务
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile.api
-    container_name: langgraph-api
+  react-agent-api:
+    build: .
+    container_name: react-agent-api
     ports:
       - "8000:8000"
     environment:
-      - LANGGRAPH_API_URL=http://langgraph:2024
-      - API_HOST=0.0.0.0
-      - API_PORT=8000
-    depends_on:
-      langgraph:
-        condition: service_healthy
-    networks:
-      - langgraph-network
+      # OpenAI API 配置
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+      # Tavily API 配置（用于搜索功能）
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      # 可选：自定义模型配置
+      - MODEL_NAME=${MODEL_NAME:-openai/gpt-4o-mini}
+      - MAX_SEARCH_RESULTS=${MAX_SEARCH_RESULTS:-10}
+    volumes:
+      # 挂载日志目录（可选）
+      - ./logs:/app/logs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    networks:
+      - react-agent-network
 
 networks:
-  langgraph-network:
+  react-agent-network:
     driver: bridge
-
-volumes:
-  langgraph-data:
